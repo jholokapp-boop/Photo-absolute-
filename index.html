@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ESRGAN">
+    <title>Real-ESRGAN AI Upscaler</title>
+
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="icon" type="image/png" href="icon-192.png">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+
+    <style>
+        * { -webkit-tap-highlight-color: transparent; }
+        html, body {
+            overscroll-behavior: none;
+            touch-action: pan-y;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        /* Golden Glow Card */
+        .golden-card {
+            background: linear-gradient(135deg, rgba(20, 20, 30, 0.95), rgba(40, 30, 10, 0.9));
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 2px solid rgba(251, 191, 36, 0.6);
+            box-shadow: 0 0 50px rgba(251, 191, 36, 0.35), inset 0 0 20px rgba(251, 191, 36, 0.15);
+        }
+        /* Before After Slider Style */
+        .img-comp-container {
+            position: relative;
+            width: 100%;
+            height: 320px;
+            overflow: hidden;
+            border-radius: 1rem;
+        }
+        .img-comp-img {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .img-comp-img img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .img-comp-overlay {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        .slider-range {
+            position: absolute;
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            outline: none;
+            margin: 0;
+            z-index: 30;
+            cursor: ew-resize;
+        }
+        .slider-range::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 4px;
+            height: 320px;
+            background: #fbbf24;
+            cursor: ew-resize;
+            box-shadow: 0 0 10px #fbbf24;
+        }
+        /* Splash screen */
+        #splash {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: linear-gradient(135deg, #020617, #1e1b4b, #3b0764);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.6s ease;
+        }
+        #splash.hide { opacity: 0; pointer-events: none; }
+        #splash img {
+            width: 120px; height: 120px;
+            border-radius: 24px;
+            box-shadow: 0 0 40px rgba(34,211,238,0.6);
+            animation: pulse 1.8s ease-in-out infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes pulse {
+            0%,100% { transform: scale(1); box-shadow: 0 0 30px rgba(34,211,238,0.5); }
+            50% { transform: scale(1.06); box-shadow: 0 0 55px rgba(236,72,153,0.7); }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-950 via-indigo-950 to-purple-950 min-h-screen text-white flex flex-col items-center justify-center p-4">
+
+    <!-- Splash Screen -->
+    <div id="splash">
+        <img src="icon-512.png" alt="logo">
+        <h2 class="text-xl font-extrabold bg-gradient-to-r from-cyan-400 to-pink-400 bg-clip-text text-transparent">Real-ESRGAN AI</h2>
+        <p class="text-gray-400 text-xs mt-1.5">4x Neural Upscaler</p>
+    </div>
+
+    <!-- Main Card -->
+    <div class="glass max-w-xl w-full rounded-3xl p-6 md:p-8 shadow-2xl relative">
+        <div class="flex flex-col items-center mb-2">
+            <img src="icon-192.png" class="w-12 h-12 rounded-xl mb-2 shadow-lg" alt="logo">
+            <h1 class="text-2xl font-extrabold text-center bg-gradient-to-r from-cyan-400 to-pink-400 bg-clip-text text-transparent">Real-ESRGAN AI Upscaler</h1>
+        </div>
+        <p class="text-center text-gray-300 text-xs mb-6">রিয়েল-টাইম নিউরাল নেটওয়ার্ক দিয়ে ছবির শার্পনেস ও ডিটেইলস ৪ গুণ বৃদ্ধি করুন।</p>
+
+        <!-- Install button -->
+        <button id="install-btn" class="hidden w-full mb-4 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl shadow-md transition">
+            📲 অ্যাপ ইনস্টল করুন
+        </button>
+
+        <div id="offline-badge" class="hidden mb-4 text-center text-[11px] bg-emerald-500/20 text-emerald-300 py-1.5 rounded-lg">
+            ✓ অফলাইন মোডে চলছে
+        </div>
+
+        <!-- Drag & Drop Zone -->
+        <div id="drop-zone" class="border-2 border-dashed border-cyan-400/40 rounded-2xl p-6 text-center cursor-pointer hover:border-pink-400 transition bg-white/5 mb-6 group">
+            <input type="file" id="file-input" accept="image/*" class="hidden">
+            <div id="drop-content" class="flex flex-col items-center">
+                <svg class="mx-auto h-12 w-12 text-cyan-300 group-hover:text-pink-400 transition mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
+                <p class="text-sm font-medium text-gray-200">ছবি ড্র্যাগ করুন অথবা ক্লিক করে সিলেক্ট করুন</p>
+                <p class="text-xs text-gray-400 mt-1">PNG, JPG, WEBP</p>
+            </div>
+            <div id="preview-container" class="hidden flex flex-col items-center">
+                <img id="image-preview" class="max-h-40 rounded-xl shadow-md mb-2 object-contain" alt="Preview">
+                <span id="file-name" class="text-xs text-cyan-300"></span>
+            </div>
+        </div>
+
+        <button id="enhance-btn" disabled class="w-full py-3.5 px-4 bg-gradient-to-r from-cyan-500 to-pink-500 text-white font-bold rounded-2xl shadow-lg opacity-40 cursor-not-allowed hover:opacity-95 transition">
+            Real-ESRGAN দিয়ে শার্প করুন
+        </button>
+    </div>
+
+    <!-- Golden Gallery Card Modal / Pop-up -->
+    <div id="gallery-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
+        <div class="golden-card max-w-xl w-full rounded-3xl p-6 flex flex-col items-center relative animate-fade-in">
+            <!-- Close Button -->
+            <button id="close-modal" class="absolute top-4 right-4 text-amber-300 hover:text-white bg-amber-500/20 hover:bg-amber-500/40 p-2 rounded-full transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+
+            <h2 class="text-lg font-extrabold text-amber-300 mb-2 flex items-center gap-2">
+                ✨ এআই গ্যালারি কার্ড (4x Enhanced)
+            </h2>
+            <p id="progress-status-text" class="text-xs text-amber-200/80 mb-4 text-center">প্রসেসিং হচ্ছে...</p>
+
+            <!-- Progress Bar & Percentage -->
+            <div id="progress-container" class="w-full bg-black/40 rounded-full h-3 mb-6 p-0.5 border border-amber-500/30">
+                <div id="progress-bar" class="bg-gradient-to-r from-amber-400 to-yellow-300 h-full rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <div id="progress-percent" class="text-amber-400 font-bold text-sm mb-4">0%</div>
+
+            <!-- Before/After Slider Container (Hidden initially) -->
+            <div id="slider-section" class="hidden w-full flex flex-col items-center">
+                <div class="img-comp-container mb-4 border border-amber-500/40 shadow-xl">
+                    <!-- After Image (Background) -->
+                    <div class="img-comp-img">
+                        <img id="result-image" alt="Enhanced Result">
+                    </div>
+                    <!-- Before Image (Overlay clipped by width) -->
+                    <div id="before-wrapper" class="img-comp-overlay" style="width: 50%;">
+                        <img id="original-preview" alt="Original">
+                    </div>
+                    <!-- Range Slider Control -->
+                    <input type="range" min="0" max="100" value="50" class="slider-range" id="comparison-slider">
+                </div>
+                <div class="flex justify-between w-full text-[11px] text-amber-300/80 px-1 mb-4 font-semibold uppercase tracking-wider">
+                    <span>← মূল ছবি (Before)</span>
+                    <span>এআই শার্পড (After) →</span>
+                </div>
+                <a id="download-btn" download="real-esrgan-enhanced.png" class="w-full py-3 px-6 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 text-sm font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    ফাইনাল ছবি ডাউনলোড করুন
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* ========== SPLASH HIDE ========== */
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                document.getElementById('splash').classList.add('hide');
+            }, 1200);
+        });
+
+        /* ========== SERVICE WORKER ========== */
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW failed:', err));
+            });
+        }
+
+        /* ========== INSTALL PROMPT ========== */
+        let deferredPrompt = null;
+        const installBtn = document.getElementById('install-btn');
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            installBtn.classList.remove('hidden');
+        });
+        installBtn.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            if (outcome === 'accepted') installBtn.classList.add('hidden');
+            deferredPrompt = null;
+        });
+
+        /* ========== OFFLINE BADGE ========== */
+        function updateOnlineStatus() {
+            const badge = document.getElementById('offline-badge');
+            if (!navigator.onLine) badge.classList.remove('hidden');
+            else badge.classList.add('hidden');
+        }
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        updateOnlineStatus();
+
+        /* ========== HIGH QUALITY PROCESSOR ========== */
+        const TARGET_W = 385;
+        const TARGET_H = 512;
+
+        async function processTo385x512(sourceCanvas) {
+            let current = sourceCanvas;
+            let currentW = current.width;
+            let currentH = current.height;
+
+            while ( currentW > TARGET_W * 2 || currentH > TARGET_H * 2 ) {
+                const scale = Math.min((TARGET_W * 2) / currentW, (TARGET_H * 2) / currentH);
+                const nextW = Math.max(TARGET_W, Math.round(currentW * scale));
+                const nextH = Math.max(TARGET_H, Math.round(currentH * scale));
+
+                const next = document.createElement("canvas");
+                next.width = nextW;
+                next.height = nextH;
+                const ctx = next.getContext("2d", { alpha: false });
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = "high";
+                ctx.drawImage(current, 0, 0, currentW, currentH, 0, 0, nextW, nextH );
+
+                current = next;
+                currentW = nextW;
+                currentH = nextH;
+                await new Promise(resolve => requestAnimationFrame(resolve));
+            }
+
+            const output = document.createElement("canvas");
+            output.width = TARGET_W;
+            output.height = TARGET_H;
+            const ctx = output.getContext("2d", { alpha: false });
+            ctx.fillStyle = "#000000";
+            ctx.fillRect(0, 0, TARGET_W, TARGET_H);
+
+            const scale = Math.min(TARGET_W / currentW, TARGET_H / currentH);
+            const drawW = Math.round(currentW * scale);
+            const drawH = Math.round(currentH * scale);
+            const offsetX = Math.round((TARGET_W - drawW) / 2);
+            const offsetY = Math.round((TARGET_H - drawH) / 2);
+
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = "high";
+            ctx.drawImage(current, 0, 0, currentW, currentH, offsetX, offsetY, drawW, drawH);
+            return output;
+        }
+
+        function loadImage385(file) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                const url = URL.createObjectURL(file);
+                img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+                img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("ছবি পড়া যায়নি।")); };
+                img.src = url;
+            });
+        }
+
+        /* ========== UI LOGIC ========== */
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const dropContent = document.getElementById('drop-content');
+        const previewContainer = document.getElementById('preview-container');
+        const imagePreview = document.getElementById('image-preview');
+        const fileNameEl = document.getElementById('file-name');
+        const enhanceBtn = document.getElementById('enhance-btn');
+        
+        // Modal elements
+        const galleryModal = document.getElementById('gallery-modal');
+        const closeModal = document.getElementById('close-modal');
+        const progressStatusText = document.getElementById('progress-status-text');
+        const progressBar = document.getElementById('progress-bar');
+        const progressPercent = document.getElementById('progress-percent');
+        const progressContainer = document.getElementById('progress-container');
+        const sliderSection = document.getElementById('slider-section');
+        const resultImage = document.getElementById('result-image');
+        const originalPreview = document.getElementById('original-preview');
+        const beforeWrapper = document.getElementById('before-wrapper');
+        const comparisonSlider = document.getElementById('comparison-slider');
+        const downloadBtn = document.getElementById('download-btn');
+
+        let selectedFile = null;
+        let session = null;
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-pink-400'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-pink-400'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-pink-400');
+            if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => { if (e.target.files.length) handleFile(e.target.files[0]); });
+
+        function handleFile(file) {
+            selectedFile = file;
+            fileNameEl.textContent = file.name;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imagePreview.src = e.target.result;
+                originalPreview.src = e.target.result;
+                dropContent.classList.add('hidden');
+                previewContainer.classList.remove('hidden');
+                enhanceBtn.disabled = false;
+                enhanceBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        closeModal.addEventListener('click', () => {
+            galleryModal.classList.add('hidden');
+        });
+
+        // Before/After Slider Interaction
+        comparisonSlider.addEventListener('input', (e) => {
+            const val = e.target.value;
+            beforeWrapper.style.width = val + '%';
+        });
+
+        function updateProgress(percent, text) {
+            progressBar.style.width = percent + '%';
+            progressPercent.textContent = percent + '%';
+            progressStatusText.textContent = text;
+        }
+
+        enhanceBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+            
+            // Open Golden Gallery Modal
+            galleryModal.classList.remove('hidden');
+            sliderSection.classList.add('hidden');
+            progressContainer.style.display = 'block';
+            progressPercent.style.display = 'block';
+
+            try {
+                updateProgress(15, "ছবি হাই-কোয়ালিটি ফরম্যাটে প্রসেস হচ্ছে...");
+                const processedCanvas = await imageFileTo385x512(selectedFile);
+
+                if (!session) {
+                    updateProgress(40, "Real-ESRGAN নিউরাল মডেল লোড হচ্ছে...");
+                    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+                    const modelUrl = 'https://huggingface.co/Heliosoph/realesrgan-onnx/resolve/main/realesr-general-x4v3.onnx';
+                    session = await ort.InferenceSession.create(modelUrl, {
+                        executionProviders: ['webgl', 'wasm']
+                    });
+                }
+
+                updateProgress(70, "এআই মডেল দ্বারা 4x শার্পনেস রিকনস্ট্রাক্ট করা হচ্ছে...");
+
+                const w = processedCanvas.width;
+                const h = processedCanvas.height;
+                const ctx = processedCanvas.getContext('2d', { willReadFrequently: true });
+                const imgData = ctx.getImageData(0, 0, w, h);
+
+                const floatData = new Float32Array(3 * w * h);
+                for (let i = 0; i < w * h; i++) {
+                    floatData[i] = imgData.data[i * 4] / 255.0;
+                    floatData[w * h + i] = imgData.data[i * 4 + 1] / 255.0;
+                    floatData[2 * w * h + i] = imgData.data[i * 4 + 2] / 255.0;
+                }
+
+                const inputTensor = new ort.Tensor('float32', floatData, [1, 3, h, w]);
+                const feeds = {};
+                feeds[session.inputNames[0]] = inputTensor;
+
+                const results = await session.run(feeds);
+                const outputTensor = results[session.outputNames[0]];
+
+                updateProgress(95, "ফাইনাল রেন্ডারিং চলছে...");
+
+                const outH = h * 4, outW = w * 4;
+                const outData = outputTensor.data;
+
+                const outCanvas = document.createElement('canvas');
+                outCanvas.width = outW;
+                outCanvas.height = outH;
+                const outCtx = outCanvas.getContext('2d');
+                const outImageData = outCtx.createImageData(outW, outH);
+
+                for (let i = 0; i < outW * outH; i++) {
+                    outImageData.data[i * 4]     = Math.min(255, Math.max(0, Math.round(outData[i] * 255)));
+                    outImageData.data[i * 4 + 1] = Math.min(255, Math.max(0, Math.round(outData[outW * outH + i] * 255)));
+                    outImageData.data[i * 4 + 2] = Math.min(255, Math.max(0, Math.round(outData[2 * outW * outH + i] * 255)));
+                    outImageData.data[i * 4 + 3] = 255;
+                }
+
+                outCtx.putImageData(outImageData, 0, 0);
+
+                outCanvas.toBlob((blob) => {
+                    const resultUrl = URL.createObjectURL(blob);
+                    resultImage.src = resultUrl;
+                    downloadBtn.href = resultUrl;
+
+                    updateProgress(100, "সম্পন্ন হয়েছে!");
+                    setTimeout(() => {
+                        progressContainer.style.display = 'none';
+                        progressPercent.style.display = 'none';
+                        progressStatusText.textContent = "সফলভাবে ৪ গুণ (4x) শার্প করা হয়েছে। স্লাইডার টেনে তুলনা করুন:";
+                        sliderSection.classList.remove('hidden');
+                    }, 500);
+                }, 'image/png');
+
+            } catch (err) {
+                console.error(err);
+                progressStatusText.textContent = "ত্রুটি: " + err.message;
+            }
+        });
+    </script>
+</body>
+</html>
